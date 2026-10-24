@@ -1,0 +1,577 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Criar arquivos do projeto
+        run: |
+          mkdir -p "$(dirname settings.gradle.kts)"
+          cat > settings.gradle.kts <<'GBEOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "FoneBateria"
+          include(":app")
+          GBEOF
+          mkdir -p "$(dirname build.gradle.kts)"
+          cat > build.gradle.kts <<'GBEOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          GBEOF
+          mkdir -p "$(dirname gradle.properties)"
+          cat > gradle.properties <<'GBEOF'
+          org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+          android.useAndroidX=false
+          android.nonTransitiveRClass=true
+          GBEOF
+          mkdir -p "$(dirname app/build.gradle.kts)"
+          cat > app/build.gradle.kts <<'GBEOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.fonebateria.app"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.fonebateria.app"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          GBEOF
+          mkdir -p "$(dirname app/src/main/AndroidManifest.xml)"
+          cat > app/src/main/AndroidManifest.xml <<'GBEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+              <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+
+              <application
+                  android:allowBackup="false"
+                  android:icon="@drawable/ic_launcher"
+                  android:label="Bateria do Fone"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          GBEOF
+          mkdir -p "$(dirname app/src/main/res/drawable/ic_launcher.xml)"
+          cat > app/src/main/res/drawable/ic_launcher.xml <<'GBEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="96dp"
+              android:height="96dp"
+              android:viewportWidth="96"
+              android:viewportHeight="96">
+              <path
+                  android:fillColor="#FF6A00"
+                  android:pathData="M48,48m-48,0a48,48 0 1,0 96,0a48,48 0 1,0 -96,0" />
+              <path
+                  android:fillColor="#00000000"
+                  android:strokeColor="#FFFFFF"
+                  android:strokeWidth="6"
+                  android:pathData="M24,56 C24,34 34,24 48,24 C62,24 72,34 72,56" />
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M20,52 h14 v26 h-14 z M62,52 h14 v26 h-14 z" />
+          </vector>
+          GBEOF
+          mkdir -p "$(dirname app/src/main/java/com/fonebateria/app/MainActivity.kt)"
+          cat > app/src/main/java/com/fonebateria/app/MainActivity.kt <<'GBEOF'
+          package com.fonebateria.app
+
+          import android.Manifest
+          import android.app.Activity
+          import android.bluetooth.BluetoothA2dp
+          import android.bluetooth.BluetoothAdapter
+          import android.bluetooth.BluetoothDevice
+          import android.bluetooth.BluetoothHeadset
+          import android.bluetooth.BluetoothManager
+          import android.bluetooth.BluetoothProfile
+          import android.content.BroadcastReceiver
+          import android.content.ClipData
+          import android.content.ClipboardManager
+          import android.content.Context
+          import android.content.Intent
+          import android.content.IntentFilter
+          import android.content.pm.PackageManager
+          import android.content.res.ColorStateList
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.graphics.drawable.GradientDrawable
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.view.ViewGroup
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.ProgressBar
+          import android.widget.ScrollView
+          import android.widget.TextView
+          import android.widget.Toast
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+
+          class MainActivity : Activity() {
+
+              private val BG = Color.parseColor("#0F1220")
+              private val CARD = Color.parseColor("#1A1F36")
+              private val MUTED = Color.parseColor("#8B92B5")
+              private val ORANGE = Color.parseColor("#FF6A00")
+              private val GREEN = Color.parseColor("#2ECC71")
+              private val YELLOW = Color.parseColor("#F1C40F")
+              private val RED = Color.parseColor("#E74C3C")
+              private val BLUE = Color.parseColor("#2D3561")
+
+              private val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+              private val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+
+              private val ACTION_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
+              private val EXTRA_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
+
+              private class Dev(val address: String) {
+                  var name: String = "Fone"
+                  var battery: Int? = null
+                  var source: String = ""
+                  var connected: Boolean = false
+                  var updated: Long = 0L
+              }
+
+              private val devices = LinkedHashMap<String, Dev>()
+              private val logLines = mutableListOf<String>()
+              private val handler = Handler(Looper.getMainLooper())
+              private var registered = false
+
+              private lateinit var statusView: TextView
+              private lateinit var devicesBox: LinearLayout
+              private lateinit var logView: TextView
+
+              private val ticker = object : Runnable {
+                  override fun run() {
+                      refreshDevices()
+                      handler.postDelayed(this, 5000)
+                  }
+              }
+
+              private val receiver = object : BroadcastReceiver() {
+                  override fun onReceive(c: Context, i: Intent) {
+                      val action = i.action ?: return
+                      val dev = deviceFrom(i)
+                      log("evento ${action.substringAfterLast('.')} ${dump(i)}")
+                      when (action) {
+                          ACTION_BATTERY -> {
+                              val lvl = i.getIntExtra(EXTRA_BATTERY, -1)
+                              if (dev != null && lvl in 0..100) setBattery(dev, lvl, "Android (evento)")
+                          }
+                          BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                              if (dev != null) devices[dev.address]?.connected = false
+                          }
+                          BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT -> parseVendor(i, dev)
+                          else -> refreshDevices()
+                      }
+                      render()
+                  }
+              }
+
+              // ---------- ciclo de vida ----------
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  window.statusBarColor = BG
+                  window.navigationBarColor = BG
+                  buildUi()
+                  log("Android ${Build.VERSION.SDK_INT} • ${Build.MANUFACTURER} ${Build.MODEL}")
+                  if (hasPermission()) {
+                      startMonitoring()
+                  } else {
+                      statusView.text = "Permita o acesso a dispositivos Bluetooth para ver a bateria."
+                      requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 1)
+                  }
+              }
+
+              override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
+                  super.onRequestPermissionsResult(code, perms, results)
+                  if (hasPermission()) {
+                      startMonitoring()
+                  } else {
+                      statusView.text = "Sem permissão de Bluetooth o app não consegue ler a bateria do fone."
+                  }
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  if (hasPermission()) startMonitoring()
+              }
+
+              override fun onPause() {
+                  super.onPause()
+                  handler.removeCallbacks(ticker)
+                  if (registered) {
+                      try {
+                          unregisterReceiver(receiver)
+                      } catch (e: Exception) {
+                      }
+                      registered = false
+                  }
+              }
+
+              private fun hasPermission(): Boolean =
+                  Build.VERSION.SDK_INT < 31 ||
+                          checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+
+              private fun startMonitoring() {
+                  if (!registered) {
+                      val f = IntentFilter().apply {
+                          addAction(ACTION_BATTERY)
+                          addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+                          addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                          addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
+                          addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
+                          addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                      }
+                      val v = IntentFilter(BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT).apply {
+                          addCategory("android.bluetooth.headset.intent.category.companyid.76")
+                          addCategory("android.bluetooth.headset.intent.category.companyid.911")
+                      }
+                      if (Build.VERSION.SDK_INT >= 33) {
+                          registerReceiver(receiver, f, Context.RECEIVER_EXPORTED)
+                          registerReceiver(receiver, v, Context.RECEIVER_EXPORTED)
+                      } else {
+                          registerReceiver(receiver, f)
+                          registerReceiver(receiver, v)
+                      }
+                      registered = true
+                  }
+                  handler.removeCallbacks(ticker)
+                  handler.post(ticker)
+              }
+
+              // ---------- Bluetooth ----------
+
+              @Suppress("DEPRECATION")
+              private fun deviceFrom(i: Intent): BluetoothDevice? =
+                  if (Build.VERSION.SDK_INT >= 33)
+                      i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                  else
+                      i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+
+              private fun nameOf(d: BluetoothDevice): String =
+                  try {
+                      d.name ?: "Fone"
+                  } catch (e: SecurityException) {
+                      "Fone"
+                  }
+
+              private fun reflectBattery(d: BluetoothDevice): Int? =
+                  try {
+                      val v = d.javaClass.getMethod("getBatteryLevel").invoke(d) as Int
+                      if (v in 0..100) v else null
+                  } catch (e: Throwable) {
+                      null
+                  }
+
+              private fun setBattery(d: BluetoothDevice, level: Int, source: String) {
+                  val dev = devices.getOrPut(d.address) { Dev(d.address) }
+                  dev.name = nameOf(d)
+                  dev.connected = true
+                  if (dev.battery != level) log("${dev.name}: bateria $level% ($source)")
+                  dev.battery = level
+                  dev.source = source
+                  dev.updated = System.currentTimeMillis()
+              }
+
+              private fun refreshDevices() {
+                  val adapter = (getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+                  if (adapter == null) {
+                      statusView.text = "Este aparelho não tem Bluetooth."
+                      return
+                  }
+                  if (!adapter.isEnabled) {
+                      statusView.text = "Bluetooth desligado. Ligue para ver a bateria do fone."
+                      devices.values.forEach { it.connected = false }
+                      render()
+                      return
+                  }
+                  statusView.text = "Bluetooth ligado • atualizando a cada 5 segundos"
+
+                  val seen = HashSet<String>()
+                  var done = 0
+                  val finish = {
+                      done++
+                      if (done >= 2) {
+                          devices.values.forEach { it.connected = it.address in seen }
+                          render()
+                      }
+                  }
+                  for (profile in intArrayOf(BluetoothProfile.HEADSET, BluetoothProfile.A2DP)) {
+                      val listener = object : BluetoothProfile.ServiceListener {
+                          override fun onServiceConnected(p: Int, proxy: BluetoothProfile) {
+                              runOnUiThread {
+                                  try {
+                                      for (d in proxy.connectedDevices) {
+                                          seen.add(d.address)
+                                          val dev = devices.getOrPut(d.address) { Dev(d.address) }
+                                          dev.name = nameOf(d)
+                                          dev.connected = true
+                                          val b = reflectBattery(d)
+                                          if (b != null) {
+                                              if (dev.battery != b) log("${dev.name}: bateria $b% (Android)")
+                                              dev.battery = b
+                                              dev.source = "Android"
+                                              dev.updated = System.currentTimeMillis()
+                                          }
+                                      }
+                                  } catch (e: SecurityException) {
+                                      log("Sem permissão para listar dispositivos")
+                                  }
+                                  adapter.closeProfileProxy(p, proxy)
+                                  finish()
+                              }
+                          }
+
+                          override fun onServiceDisconnected(p: Int) {}
+                      }
+                      val ok = try {
+                          adapter.getProfileProxy(this, listener, profile)
+                      } catch (e: SecurityException) {
+                          false
+                      }
+                      if (!ok) finish()
+                  }
+              }
+
+              @Suppress("DEPRECATION")
+              private fun parseVendor(i: Intent, dev: BluetoothDevice?) {
+                  val cmd = i.getStringExtra(BluetoothHeadset.EXTRA_VENDOR_SPECIFIC_HEADSET_EVENT_CMD)
+                  val args = i.getSerializableExtra(BluetoothHeadset.EXTRA_VENDOR_SPECIFIC_HEADSET_EVENT_ARGS) as? Array<*>
+                  if (cmd == "+IPHONEACCEV" && args != null && dev != null) {
+                      val n = (args.getOrNull(0) as? Int) ?: 0
+                      for (k in 0 until n) {
+                          val key = args.getOrNull(1 + 2 * k) as? Int
+                          val value = args.getOrNull(2 + 2 * k) as? Int
+                          if (key == 1 && value != null) setBattery(dev, (value + 1) * 10, "Fone (HFP)")
+                      }
+                  }
+              }
+
+              @Suppress("DEPRECATION")
+              private fun dump(i: Intent): String {
+                  val ex = i.extras ?: return ""
+                  return ex.keySet().joinToString(", ") { k -> "$k=${shown(ex.get(k))}" }
+              }
+
+              private fun shown(v: Any?): String = when (v) {
+                  is BluetoothDevice -> v.address
+                  is Array<*> -> v.joinToString(prefix = "[", postfix = "]")
+                  else -> v.toString()
+              }
+
+              // ---------- UI ----------
+
+              private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+              private fun roundBg(color: Int, radius: Int = 16): GradientDrawable =
+                  GradientDrawable().apply {
+                      setColor(color)
+                      cornerRadius = dp(radius).toFloat()
+                  }
+
+              private fun tv(t: String, size: Float, color: Int = Color.WHITE, bold: Boolean = false): TextView =
+                  TextView(this).apply {
+                      text = t
+                      textSize = size
+                      setTextColor(color)
+                      if (bold) setTypeface(typeface, Typeface.BOLD)
+                  }
+
+              private fun btn(label: String, color: Int, onClick: () -> Unit): Button =
+                  Button(this).apply {
+                      setText(label)
+                      isAllCaps = false
+                      textSize = 15f
+                      setTextColor(Color.WHITE)
+                      background = roundBg(color, 14)
+                      setOnClickListener { onClick() }
+                  }
+
+              private fun lp(top: Int = 12): LinearLayout.LayoutParams =
+                  LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(top) }
+
+              private fun buildUi() {
+                  val scroll = ScrollView(this).apply { setBackgroundColor(BG) }
+                  val root = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(dp(16), dp(24), dp(16), dp(32))
+                  }
+                  scroll.addView(root)
+                  setContentView(scroll)
+
+                  root.addView(tv("🎧 Bateria do Fone", 26f, Color.WHITE, true))
+                  statusView = tv("Iniciando...", 13f, MUTED)
+                  root.addView(statusView)
+
+                  devicesBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                  root.addView(devicesBox, lp(14))
+
+                  val caseCard = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      background = roundBg(CARD)
+                      setPadding(dp(16), dp(14), dp(16), dp(14))
+                  }
+                  caseCard.addView(tv("🔋 Caixa de carga", 16f, Color.WHITE, true))
+                  caseCard.addView(
+                      tv(
+                          "A bateria da caixa só aparece se o seu fone enviar essa informação ao celular. " +
+                                  "Veja o diagnóstico abaixo: se o fone enviar, ela aparecerá nos eventos.",
+                          13f, MUTED
+                      )
+                  )
+                  root.addView(caseCard, lp(12))
+
+                  root.addView(
+                      btn("🔄 Atualizar agora", ORANGE) { refreshDevices() },
+                      LinearLayout.LayoutParams(MATCH, dp(52)).apply { topMargin = dp(16) }
+                  )
+                  root.addView(
+                      btn("📋 Copiar diagnóstico", BLUE) { copyDiagnostic() },
+                      LinearLayout.LayoutParams(MATCH, dp(48)).apply { topMargin = dp(10) }
+                  )
+
+                  root.addView(tv("🔍 Diagnóstico", 18f, Color.WHITE, true), lp(24))
+                  logView = tv("", 11f, MUTED).apply {
+                      typeface = Typeface.MONOSPACE
+                      background = roundBg(CARD)
+                      setPadding(dp(12), dp(12), dp(12), dp(12))
+                      setTextIsSelectable(true)
+                  }
+                  root.addView(logView, lp(8))
+                  logView.text = logLines.joinToString("\n")
+
+                  render()
+              }
+
+              private fun colorFor(level: Int): Int = when {
+                  level <= 15 -> RED
+                  level <= 30 -> YELLOW
+                  else -> GREEN
+              }
+
+              private fun render() {
+                  devicesBox.removeAllViews()
+                  val list = devices.values.filter { it.connected }
+                  if (list.isEmpty()) {
+                      devicesBox.addView(
+                          tv("Nenhum fone conectado. Conecte o fone ao celular e aguarde alguns segundos.", 14f, MUTED)
+                      )
+                      return
+                  }
+                  val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                  for (d in list) {
+                      val card = LinearLayout(this).apply {
+                          orientation = LinearLayout.VERTICAL
+                          background = roundBg(CARD)
+                          setPadding(dp(16), dp(14), dp(16), dp(14))
+                      }
+                      card.addView(tv("🎧 ${d.name}", 16f, Color.WHITE, true))
+                      val b = d.battery
+                      if (b != null) {
+                          card.addView(tv("$b%", 44f, colorFor(b), true))
+                          val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                              max = 100
+                              progress = b
+                              progressTintList = ColorStateList.valueOf(colorFor(b))
+                          }
+                          card.addView(bar, LinearLayout.LayoutParams(MATCH, dp(10)).apply { topMargin = dp(6) })
+                          card.addView(
+                              tv("Fonte: ${d.source} • atualizado às ${fmt.format(Date(d.updated))}", 12f, MUTED),
+                              lp(8)
+                          )
+                      } else {
+                          card.addView(tv("O fone ainda não informou a bateria.", 14f, MUTED), lp(8))
+                      }
+                      devicesBox.addView(card, lp(10))
+                  }
+              }
+
+              private fun log(s: String) {
+                  val t = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                  logLines.add("$t $s")
+                  while (logLines.size > 80) logLines.removeAt(0)
+                  if (::logView.isInitialized) logView.text = logLines.joinToString("\n")
+              }
+
+              private fun copyDiagnostic() {
+                  val sb = StringBuilder()
+                  sb.append("Aparelho: ${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.SDK_INT})\n")
+                  for (d in devices.values) {
+                      sb.append("Dispositivo: ${d.name} ${d.address} conectado=${d.connected} bateria=${d.battery} fonte=${d.source}\n")
+                  }
+                  sb.append(logLines.joinToString("\n"))
+                  val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                  cm.setPrimaryClip(ClipData.newPlainText("diagnostico", sb.toString()))
+                  Toast.makeText(this, "Diagnóstico copiado", Toast.LENGTH_SHORT).show()
+              }
+          }
+          GBEOF
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Compilar APK
+        run: gradle assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FoneBateria-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
